@@ -158,24 +158,37 @@ defmodule Pogo.DynamicSupervisor do
   defp sync_local_children(scope, supervisor) do
     # go through all processes supervised by the local supervisor
     # to sync its state with cluster supervisor
-    for {id, pid, _, _} <- Supervisor.which_children(supervisor), is_pid(pid) do
-      case fetch_child_spec(scope, id) do
-        {:ok, _child_spec} ->
-          # ensure that we track new pids of child processes that may have
-          # crashed and been restarted by local supervisor
-          unless pid in :pg.get_members(scope, {:pid, id}) do
-            :pg.join(scope, {:pid, id}, pid)
-          end
-
-        :error ->
-          # terminate child processes that were scheduled to be terminated
-          # (by having their specs removed)
-          Supervisor.terminate_child(supervisor, id)
-          Supervisor.delete_child(supervisor, id)
-          :pg.leave(scope, {:child, id}, self())
-          :pg.leave(scope, {:pid, id}, pid)
-      end
+    for child <- Supervisor.which_children(supervisor) do
+      sync_local_child(child, scope, supervisor)
     end
+  end
+
+  defp sync_local_child({id, pid, _, _}, scope, supervisor) when is_pid(pid) do
+    case fetch_child_spec(scope, id) do
+      {:ok, _child_spec} ->
+        # ensure that we track new pids of child processes that may have
+        # crashed and been restarted by local supervisor
+        unless pid in :pg.get_members(scope, {:pid, id}) do
+          :pg.join(scope, {:pid, id}, pid)
+        end
+
+      :error ->
+        # terminate child processes that were scheduled to be terminated
+        # (by having their specs removed)
+        Supervisor.terminate_child(supervisor, id)
+        Supervisor.delete_child(supervisor, id)
+        :pg.leave(scope, {:child, id}, self())
+        :pg.leave(scope, {:pid, id}, pid)
+    end
+  end
+
+  defp sync_local_child({id, :undefined, _, _}, _scope, supervisor) do
+    # restart supervised child process that is not running
+    Supervisor.restart_child(supervisor, id)
+  end
+
+  defp sync_local_child(_, _, _) do
+    :noop
   end
 
   def to_child(scope, id) do
