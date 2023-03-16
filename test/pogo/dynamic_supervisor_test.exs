@@ -2,6 +2,16 @@ defmodule Pogo.DynamicSupervisorTest do
   use ExUnit.Case
   import AssertAsync
 
+  setup do
+    on_exit(fn ->
+      # these tests are flaky in CI, sleep below is a naive attempt
+      # to give nodes enough time to shutdown after the test
+      :timer.sleep(1000)
+    end)
+
+    :ok
+  end
+
   test "starts child on a single node in the cluster" do
     [node1, node2] = start_nodes("foo", 2)
 
