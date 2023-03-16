@@ -41,10 +41,15 @@ defmodule Pogo.DynamicSupervisor do
     scope = Keyword.fetch!(opts, :scope)
     sync_interval = Keyword.get(opts, :sync_interval, @sync_interval)
 
+    sup_opts =
+      opts
+      |> Keyword.get(:sup_opts, [])
+      |> Keyword.put(:strategy, :one_for_one)
+
     :pg.start_link(scope)
     :ok = :pg.join(scope, {:member, Node.self()}, self())
 
-    {:ok, supervisor} = Supervisor.start_link([], strategy: :one_for_one)
+    {:ok, supervisor} = Supervisor.start_link([], sup_opts)
 
     state = %__MODULE__{
       scope: scope,
