@@ -27,7 +27,6 @@ defmodule Pogo.MixProject do
     [
       {:libring, "~> 1.6.0"},
       {:local_cluster, "~> 1.2.1", only: [:test]},
-      {:assert_eventually, "~> 1.0.0", only: [:test]},
       {:test_app, path: "test_app", only: [:test]}
     ]
   end

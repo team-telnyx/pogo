@@ -1,6 +1,6 @@
 defmodule Pogo.DynamicSupervisorTest do
   use ExUnit.Case
-  use AssertEventually, timeout: 200, interval: 50
+  import AssertAsync
 
   test "starts child on a single node in the cluster" do
     [node1, node2] = start_nodes("foo", 2)
@@ -10,12 +10,12 @@ defmodule Pogo.DynamicSupervisorTest do
     start_child(node1, child_spec)
     start_child(node2, child_spec)
 
-    eventually(
+    assert_async do
       assert %{
                ^node1 => [],
                ^node2 => [{{Pogo.Worker, 1}, _, :worker, _}]
              } = local_children([node1, node2])
-    )
+    end
   end
 
   test "terminates child running in the cluster" do
@@ -28,7 +28,7 @@ defmodule Pogo.DynamicSupervisorTest do
         child_spec
       end
 
-    eventually(
+    assert_async do
       assert %{
                ^node1 => [
                  {{Pogo.Worker, 2}, _, :worker, _}
@@ -38,12 +38,12 @@ defmodule Pogo.DynamicSupervisorTest do
                  {{Pogo.Worker, 3}, _, :worker, _}
                ]
              } = local_children(nodes)
-    )
+    end
 
     # terminate using node1 even though the process is running on node2
     terminate_child(node1, child_spec1)
 
-    eventually(
+    assert_async do
       assert %{
                ^node1 => [
                  {{Pogo.Worker, 2}, _, :worker, _}
@@ -52,19 +52,19 @@ defmodule Pogo.DynamicSupervisorTest do
                  {{Pogo.Worker, 3}, _, :worker, _}
                ]
              } = local_children(nodes)
-    )
+    end
 
     # terminate using node2 even though the process was started using node1
     terminate_child(node2, child_spec3)
 
-    eventually(
+    assert_async do
       assert %{
                ^node1 => [
                  {{Pogo.Worker, 2}, _, :worker, _}
                ],
                ^node2 => []
              } = local_children(nodes)
-    )
+    end
   end
 
   test "keeps track of new pid when child process crashes and gets restarted" do
@@ -80,14 +80,10 @@ defmodule Pogo.DynamicSupervisorTest do
     # kill child process, it will get restarted by local supervisor
     Process.exit(pid, :brutal_kill)
 
-    eventually(
-      assert [{{Pogo.Worker, 1}, _, :worker, _}] =
-               :rpc.call(node, Pogo.DynamicSupervisor, :which_children, [:global]) |> Enum.sort()
-    )
-
-    [{{Pogo.Worker, 1}, new_pid, :worker, _}] = global_children(node)
-
-    assert new_pid != pid
+    assert_async do
+      assert [{{Pogo.Worker, 1}, new_pid, :worker, _}] = global_children(node)
+      assert new_pid != pid
+    end
   end
 
   test "moves children between nodes when cluster topology changes" do
@@ -96,34 +92,34 @@ defmodule Pogo.DynamicSupervisorTest do
     start_child(node1, Pogo.Worker.child_spec(1))
     start_child(node1, Pogo.Worker.child_spec(2))
 
-    eventually(
+    assert_async do
       assert %{
                ^node1 => [
                  {{Pogo.Worker, 1}, _, :worker, _},
                  {{Pogo.Worker, 2}, _, :worker, _}
                ]
              } = local_children([node1])
-    )
+    end
 
     [node2] = start_nodes("bar", 1)
 
-    eventually(
+    assert_async do
       assert %{
                ^node1 => [{{Pogo.Worker, 2}, _, :worker, _}],
                ^node2 => [{{Pogo.Worker, 1}, _, :worker, _}]
              } = local_children([node1, node2])
-    )
+    end
 
     stop_nodes([node2])
 
-    eventually(
+    assert_async do
       assert %{
                ^node1 => [
                  {{Pogo.Worker, 1}, _, :worker, _},
                  {{Pogo.Worker, 2}, _, :worker, _}
                ]
              } = local_children([node1])
-    )
+    end
   end
 
   describe "which_children/1" do
@@ -133,17 +129,17 @@ defmodule Pogo.DynamicSupervisorTest do
       start_child(node1, Pogo.Worker.child_spec(1))
       start_child(node1, Pogo.Worker.child_spec(2))
 
-      eventually(
+      assert_async do
         assert [
                  {{Pogo.Worker, 2}, _, :worker, _}
                ] = :rpc.call(node1, Pogo.DynamicSupervisor, :which_children, [:local])
-      )
+      end
 
-      eventually(
+      assert_async do
         assert [
                  {{Pogo.Worker, 1}, _, :worker, _}
                ] = :rpc.call(node2, Pogo.DynamicSupervisor, :which_children, [:local])
-      )
+      end
 
       %{
         ^node1 => [{{Pogo.Worker, 2}, pid2, :worker, _}],
@@ -160,23 +156,23 @@ defmodule Pogo.DynamicSupervisorTest do
       start_child(node1, Pogo.Worker.child_spec(1))
       start_child(node1, Pogo.Worker.child_spec(2))
 
-      eventually(
+      assert_async do
         assert [
                  {{Pogo.Worker, 1}, _, :worker, _},
                  {{Pogo.Worker, 2}, _, :worker, _}
                ] =
                  :rpc.call(node1, Pogo.DynamicSupervisor, :which_children, [:global])
                  |> Enum.sort()
-      )
+      end
 
-      eventually(
+      assert_async do
         assert [
                  {{Pogo.Worker, 1}, _, :worker, _},
                  {{Pogo.Worker, 2}, _, :worker, _}
                ] =
                  :rpc.call(node2, Pogo.DynamicSupervisor, :which_children, [:global])
                  |> Enum.sort()
-      )
+      end
 
       assert global_children(node1) == global_children(node2)
 
