@@ -158,7 +158,7 @@ defmodule Pogo.DynamicSupervisor do
   defp sync_local_children(scope, supervisor) do
     # go through all processes supervised by the local supervisor
     # to sync its state with cluster supervisor
-    for {id, pid, _, _} <- Supervisor.which_children(supervisor) do
+    for {id, pid, _, _} <- Supervisor.which_children(supervisor), is_pid(pid) do
       case fetch_child_spec(scope, id) do
         {:ok, _child_spec} ->
           # ensure that we track new pids of child processes that may have
@@ -206,7 +206,7 @@ defmodule Pogo.DynamicSupervisor do
     children = Supervisor.which_children(supervisor)
 
     Enum.find_value(children, :error, fn
-      {^id, pid, _, _} ->
+      {^id, pid, _, _} when is_pid(pid) ->
         {:ok, pid}
 
       _ ->
