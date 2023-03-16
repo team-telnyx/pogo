@@ -106,6 +106,15 @@ defmodule Pogo.DynamicSupervisor do
         :sync,
         %{scope: scope, supervisor: supervisor, sync_interval: sync_interval} = state
       ) do
+    distribute_children(scope, supervisor)
+    sync_local_children(scope, supervisor)
+
+    Process.send_after(self(), :sync, sync_interval)
+
+    {:noreply, state}
+  end
+
+  defp distribute_children(scope, supervisor) do
     self_node = Node.self()
     groups = :pg.which_groups(scope)
 
@@ -144,7 +153,9 @@ defmodule Pogo.DynamicSupervisor do
           end
       end
     end
+  end
 
+  defp sync_local_children(scope, supervisor) do
     # go through all processes supervised by the local supervisor
     # to sync its state with cluster supervisor
     for {id, pid, _, _} <- Supervisor.which_children(supervisor) do
@@ -165,10 +176,6 @@ defmodule Pogo.DynamicSupervisor do
           :pg.leave(scope, {:pid, id}, pid)
       end
     end
-
-    Process.send_after(self(), :sync, sync_interval)
-
-    {:noreply, state}
   end
 
   def to_child(scope, id) do
