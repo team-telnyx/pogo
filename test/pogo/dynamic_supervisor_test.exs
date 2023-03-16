@@ -67,6 +67,29 @@ defmodule Pogo.DynamicSupervisorTest do
     )
   end
 
+  test "keeps track of new pid when child process crashes and gets restarted" do
+    [node] = start_nodes("foo", 1)
+
+    child_spec = Pogo.Worker.child_spec(1)
+    start_child(node, child_spec)
+
+    :timer.sleep(1000)
+
+    [{{Pogo.Worker, 1}, pid, :worker, _}] = global_children(node)
+
+    # kill child process, it will get restarted by local supervisor
+    Process.exit(pid, :brutal_kill)
+
+    eventually(
+      assert [{{Pogo.Worker, 1}, _, :worker, _}] =
+               :rpc.call(node, Pogo.DynamicSupervisor, :which_children, [:global]) |> Enum.sort()
+    )
+
+    [{{Pogo.Worker, 1}, new_pid, :worker, _}] = global_children(node)
+
+    assert new_pid != pid
+  end
+
   test "moves children between nodes when cluster topology changes" do
     [node1] = start_nodes("foo", 1)
 

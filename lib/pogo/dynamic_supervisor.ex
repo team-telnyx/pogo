@@ -145,14 +145,24 @@ defmodule Pogo.DynamicSupervisor do
       end
     end
 
-    # terminate child processes that were scheduled to be terminated (by having
-    # their specs removed)
+    # go through all processes supervised by the local supervisor
+    # to sync its state with cluster supervisor
     for {id, pid, _, _} <- Supervisor.which_children(supervisor) do
-      with :error <- fetch_child_spec(scope, id) do
-        Supervisor.terminate_child(supervisor, id)
-        Supervisor.delete_child(supervisor, id)
-        :pg.leave(scope, {:child, id}, self())
-        :pg.leave(scope, {:pid, id}, pid)
+      case fetch_child_spec(scope, id) do
+        {:ok, _child_spec} ->
+          # ensure that we track new pids of child processes that may have
+          # crashed and been restarted by local supervisor
+          unless pid in :pg.get_members(scope, {:pid, id}) do
+            :pg.join(scope, {:pid, id}, pid)
+          end
+
+        :error ->
+          # terminate child processes that were scheduled to be terminated
+          # (by having their specs removed)
+          Supervisor.terminate_child(supervisor, id)
+          Supervisor.delete_child(supervisor, id)
+          :pg.leave(scope, {:child, id}, self())
+          :pg.leave(scope, {:pid, id}, pid)
       end
     end
 
