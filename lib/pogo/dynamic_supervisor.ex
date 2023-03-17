@@ -39,12 +39,15 @@ defmodule Pogo.DynamicSupervisor do
 
   ## Options
 
+  All options accepted by `Supervisor.init/2` are also accepted here, except for
+  `:strategy` which is always `:one_for_one`. Additionally the following options
+  can be specified.
+
     * `scope` - scope to join, supervisors only cooperate with other supervisors
       operating within the same scope
     * `sync_interval` - interval in milliseconds, how often the supervisor should
       synchronize its local state with the cluster by processing requests to
       start and terminate child processes, defaults to `5_000`
-    * `sup_opts` - options passed to local supervisor, see `Supervisor.init/2`
   """
   @spec start_link(keyword) :: GenServer.on_start()
   def start_link(opts) do
@@ -86,17 +89,14 @@ defmodule Pogo.DynamicSupervisor do
   @impl true
   def init(opts) do
     scope = Keyword.fetch!(opts, :scope)
-    sync_interval = Keyword.get(opts, :sync_interval, @sync_interval)
+    {sync_interval, opts} = Keyword.pop(opts, :sync_interval, @sync_interval)
 
-    sup_opts =
-      opts
-      |> Keyword.get(:sup_opts, [])
-      |> Keyword.put(:strategy, :one_for_one)
+    opts = Keyword.put(opts, :strategy, :one_for_one)
 
     :pg.start_link(scope)
     :ok = :pg.join(scope, {:member, Node.self()}, self())
 
-    {:ok, supervisor} = Supervisor.start_link([], sup_opts)
+    {:ok, supervisor} = Supervisor.start_link([], opts)
 
     state = %__MODULE__{
       scope: scope,
