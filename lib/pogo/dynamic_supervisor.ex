@@ -1,6 +1,31 @@
 defmodule Pogo.DynamicSupervisor do
   @moduledoc """
-  Dynamic Supervisor
+  Dynamic Supervisor that distributes processes among nodes in the cluster.
+
+  Uses process groups (via `:pg`) under the hood to maintain cluster-wide
+  state and coordinate work between supervisor processes running in the
+  cluster. Supervisors are organized into independent scopes.
+
+  When a supervisor receives a request to start a child process via
+  `start_child/2`, instead of starting it immediately, it propagates that
+  request via process groups to supervisors running on other nodes.
+  Termination of child processes via `terminate_child/2` works in the same
+  way.
+
+  Each supervisor periodically synchronizes its local state by processing
+  the start and terminate requests, and updates child  process information
+  in cluster-wide state.
+
+  Supervisor processes running on different nodes, but operating within the
+  same scope, form a hash ring. When processing requests to start child
+  processes, supervisors use consistent hashing to determine if they should
+  accept the request or not, guaranteeing that there will be exactly one
+  supervisor accepting the request and actually starting the child process
+  locally.
+
+  Cluster topology changes, with supervisors being added or removed, are
+  likely to affect the distribution of child processes - some child processes
+  may get rescheduled to supervisors running on different nodes.
   """
 
   use GenServer, type: :supervisor
@@ -9,12 +34,27 @@ defmodule Pogo.DynamicSupervisor do
 
   defstruct [:scope, :supervisor, :sync_interval]
 
+  @doc """
+  Starts local supervisor and joins cluster-wide scoped process group.
+
+  ## Options
+
+    * `scope` - scope to join, supervisors only cooperate with other supervisors
+      operating within the same scope
+    * `sync_interval` - interval in milliseconds, how often the supervisor should
+      synchronize its local state with the cluster by processing requests to
+      start and terminate child processes, defaults to `5_000`
+    * `sup_opts` - options passed to local supervisor, see `Supervisor.init/2`
+  """
   @spec start_link(keyword) :: GenServer.on_start()
   def start_link(opts) do
     {name, opts} = Keyword.pop(opts, :name, __MODULE__)
     GenServer.start_link(__MODULE__, opts, name: name)
   end
 
+  @doc """
+  Requests a child process to be started under one of the supervisors in the cluster.
+  """
   @spec start_child(Supervisor.child_spec() | {module, term} | module) :: :ok
   def start_child(supervisor \\ __MODULE__, child_spec) do
     case validate_child(child_spec) do
@@ -23,11 +63,18 @@ defmodule Pogo.DynamicSupervisor do
     end
   end
 
+  @doc """
+  Requests a child process running under one of the supervisors in the cluster
+  to be terminated.
+  """
   @spec terminate_child(term) :: :ok
   def terminate_child(supervisor \\ __MODULE__, id) do
     GenServer.call(supervisor, {:terminate_child, id})
   end
 
+  @doc """
+  Returns a list with information about locally or globally supervised children.
+  """
   @spec which_children(:global | :local) :: [
           {term | :undefined, Supervisor.child() | :restarting, :worker | :supervisor,
            [module] | :dynamic}
