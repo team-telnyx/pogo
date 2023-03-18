@@ -13,7 +13,7 @@ defmodule Pogo.DynamicSupervisor do
   way.
 
   Each supervisor periodically synchronizes its local state by processing
-  the start and terminate requests, and updates child  process information
+  the start and terminate requests, and updates child process information
   in cluster-wide state.
 
   Supervisor processes running on different nodes, but operating within the
