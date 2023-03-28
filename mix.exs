@@ -47,6 +47,7 @@ defmodule Pogo.MixProject do
   defp package do
     [
       maintainers: ["Michał Szajbe <michals@telnyx.com>"],
+      licenses: ["LGPL-3.0-or-later"],
       links: %{"GitHub" => "https://github.com/team-telnyx/pogo"},
       files: ~w"lib mix.exs README.md LICENSE"
     ]

@@ -85,3 +85,16 @@ Pogo.DynamicSupervisor.terminate_child(
   {MyApp.ServiceMonitor, "10.0.0.3"}
 )
 ```
+
+## Documentation
+
+Full documentation can be found at [hexdocs.pm/pogo](https://hexdocs.pm/pogo).
+
+
+## Acknowledgments
+
+Original version of this library was developed by [Guilherme Balena Versiani](https://github.com/balena).
+
+## License
+
+GNU Lesser General Public License v3.0, see [`LICENSE`](/LICENSE) for details.
