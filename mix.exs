@@ -9,6 +9,9 @@ defmodule Pogo.MixProject do
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       deps: deps(),
+      package: package(),
+      source_url: "https://github.com/team-telnyx/pogo",
+      description: description(),
       aliases: [
         test: "test --no-start"
       ]
@@ -28,6 +31,20 @@ defmodule Pogo.MixProject do
       {:libring, "~> 1.6.0"},
       {:local_cluster, "~> 1.2.1", only: [:test]},
       {:test_app, path: "test_app", only: [:test]}
+    ]
+  end
+
+  defp description do
+    """
+    Distributed supervisor for clustered Elixir applications
+    """
+  end
+
+  defp package do
+    [
+      maintainers: ["Michał Szajbe <michals@telnyx.com>"],
+      links: %{"GitHub" => "https://github.com/team-telnyx/pogo"},
+      files: ~w"lib mix.exs README.md LICENSE"
     ]
   end
 
