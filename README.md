@@ -24,6 +24,10 @@ def deps do
 end
 ```
 
+## Documentation
+
+Full documentation can be found at [hexdocs.pm/pogo](https://hexdocs.pm/pogo).
+
 ## Example usage
 
 Let's imagine we have an application running on multiple nodes that needs to monitor some external services and we want each of these services to be monitored only once.
@@ -76,5 +80,8 @@ Pogo.DynamicSupervisor.which_children(MyApp.DistributedSupervisor, :global)
 To request a child to be terminated, its id needs to be provided. The request can be made on any of the nodes irrespective of whether the child is supervised locally or not.
 
 ```elixir
-Pogo.DynamicSupervisor.terminate_child(MyApp.DistributedSupervisor, {MyApp.ServiceMonitor, "10.0.0.3"})
+Pogo.DynamicSupervisor.terminate_child(
+  MyApp.DistributedSupervisor,
+  {MyApp.ServiceMonitor, "10.0.0.3"}
+)
 ```
