@@ -61,6 +61,8 @@ defmodule Pogo.DynamicSupervisor do
   @spec start_child(Supervisor.supervisor(), Supervisor.child_spec() | {module, term} | module) ::
           :ok
   def start_child(supervisor, child_spec) do
+    child_spec = Supervisor.child_spec(child_spec, [])
+
     case validate_child(child_spec) do
       :ok -> GenServer.call(supervisor, {:start_child, child_spec})
       error -> {:error, error}
