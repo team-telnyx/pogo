@@ -12,6 +12,8 @@ defmodule Pogo.MixProject do
       package: package(),
       source_url: "https://github.com/team-telnyx/pogo",
       description: description(),
+      name: "Pogo",
+      docs: docs(),
       aliases: [
         test: "test --no-start"
       ]
@@ -30,7 +32,8 @@ defmodule Pogo.MixProject do
     [
       {:libring, "~> 1.6.0"},
       {:local_cluster, "~> 1.2.1", only: [:test]},
-      {:test_app, path: "test_app", only: [:test]}
+      {:test_app, path: "test_app", only: [:test]},
+      {:ex_doc, "~> 0.29", only: :dev, runtime: false}
     ]
   end
 
@@ -45,6 +48,13 @@ defmodule Pogo.MixProject do
       maintainers: ["Michał Szajbe <michals@telnyx.com>"],
       links: %{"GitHub" => "https://github.com/team-telnyx/pogo"},
       files: ~w"lib mix.exs README.md LICENSE"
+    ]
+  end
+
+  defp docs do
+    [
+      main: "Readme",
+      extras: ["README.md"]
     ]
   end
 
