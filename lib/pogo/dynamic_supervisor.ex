@@ -58,8 +58,9 @@ defmodule Pogo.DynamicSupervisor do
   @doc """
   Requests a child process to be started under one of the supervisors in the cluster.
   """
-  @spec start_child(Supervisor.child_spec() | {module, term} | module) :: :ok
-  def start_child(supervisor \\ __MODULE__, child_spec) do
+  @spec start_child(Supervisor.supervisor(), Supervisor.child_spec() | {module, term} | module) ::
+          :ok
+  def start_child(supervisor, child_spec) do
     case validate_child(child_spec) do
       :ok -> GenServer.call(supervisor, {:start_child, child_spec})
       error -> {:error, error}
@@ -70,19 +71,19 @@ defmodule Pogo.DynamicSupervisor do
   Requests a child process running under one of the supervisors in the cluster
   to be terminated.
   """
-  @spec terminate_child(term) :: :ok
-  def terminate_child(supervisor \\ __MODULE__, id) do
+  @spec terminate_child(Supervisor.supervisor(), term) :: :ok
+  def terminate_child(supervisor, id) do
     GenServer.call(supervisor, {:terminate_child, id})
   end
 
   @doc """
   Returns a list with information about locally or globally supervised children.
   """
-  @spec which_children(:global | :local) :: [
+  @spec which_children(Supervisor.supervisor(), :global | :local) :: [
           {term | :undefined, Supervisor.child() | :restarting, :worker | :supervisor,
            [module] | :dynamic}
         ]
-  def which_children(supervisor \\ __MODULE__, scope) do
+  def which_children(supervisor, scope) do
     GenServer.call(supervisor, {:which_children, scope})
   end
 
@@ -243,7 +244,7 @@ defmodule Pogo.DynamicSupervisor do
     :noop
   end
 
-  def to_child(scope, id) do
+  defp to_child(scope, id) do
     with [pid | _] <- :pg.get_members(scope, {:pid, id}),
          {:ok, %{start: {mod, _, _}} = child_spec} <- fetch_child_spec(scope, id) do
       type = Map.get(child_spec, :type, :worker)
@@ -255,7 +256,7 @@ defmodule Pogo.DynamicSupervisor do
     end
   end
 
-  def fetch_child_spec(scope, id) do
+  defp fetch_child_spec(scope, id) do
     groups = :pg.which_groups(scope)
 
     Enum.find_value(groups, :error, fn
