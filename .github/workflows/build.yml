@@ -51,5 +51,8 @@ jobs:
     - name: Start EPMD
       run: epmd -daemon
 
+    - name: Run credo check
+      run: mix credo
+
     - name: Run tests
       run: mix test

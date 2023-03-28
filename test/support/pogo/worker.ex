@@ -1,4 +1,6 @@
 defmodule Pogo.Worker do
+  @moduledoc false
+
   use GenServer
 
   def child_spec(id) do
