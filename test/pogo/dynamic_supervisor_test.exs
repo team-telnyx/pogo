@@ -2,6 +2,8 @@ defmodule Pogo.DynamicSupervisorTest do
   use ExUnit.Case
   import AssertAsync
 
+  @supervisor TestApp.DistributedSupervisor
+
   setup do
     on_exit(fn ->
       # these tests are flaky in CI, sleep below is a naive attempt
@@ -142,13 +144,15 @@ defmodule Pogo.DynamicSupervisorTest do
       assert_async do
         assert [
                  {{Pogo.Worker, 2}, _, :worker, _}
-               ] = :rpc.call(node1, Pogo.DynamicSupervisor, :which_children, [:local])
+               ] =
+                 :rpc.call(node1, Pogo.DynamicSupervisor, :which_children, [@supervisor, :local])
       end
 
       assert_async do
         assert [
                  {{Pogo.Worker, 1}, _, :worker, _}
-               ] = :rpc.call(node2, Pogo.DynamicSupervisor, :which_children, [:local])
+               ] =
+                 :rpc.call(node2, Pogo.DynamicSupervisor, :which_children, [@supervisor, :local])
       end
 
       %{
@@ -171,7 +175,7 @@ defmodule Pogo.DynamicSupervisorTest do
                  {{Pogo.Worker, 1}, _, :worker, _},
                  {{Pogo.Worker, 2}, _, :worker, _}
                ] =
-                 :rpc.call(node1, Pogo.DynamicSupervisor, :which_children, [:global])
+                 :rpc.call(node1, Pogo.DynamicSupervisor, :which_children, [@supervisor, :global])
                  |> Enum.sort()
       end
 
@@ -180,7 +184,7 @@ defmodule Pogo.DynamicSupervisorTest do
                  {{Pogo.Worker, 1}, _, :worker, _},
                  {{Pogo.Worker, 2}, _, :worker, _}
                ] =
-                 :rpc.call(node2, Pogo.DynamicSupervisor, :which_children, [:global])
+                 :rpc.call(node2, Pogo.DynamicSupervisor, :which_children, [@supervisor, :global])
                  |> Enum.sort()
       end
 
@@ -208,21 +212,24 @@ defmodule Pogo.DynamicSupervisorTest do
   end
 
   defp start_child(node, child_spec) do
-    :rpc.call(node, Pogo.DynamicSupervisor, :start_child, [child_spec])
+    :rpc.call(node, Pogo.DynamicSupervisor, :start_child, [@supervisor, child_spec])
   end
 
   defp terminate_child(node, %{id: id}) do
-    :rpc.call(node, Pogo.DynamicSupervisor, :terminate_child, [id])
+    :rpc.call(node, Pogo.DynamicSupervisor, :terminate_child, [@supervisor, id])
   end
 
   defp local_children(nodes) do
     for node <- nodes, into: %{} do
-      local_children = :rpc.call(node, Pogo.DynamicSupervisor, :which_children, [:local])
+      local_children =
+        :rpc.call(node, Pogo.DynamicSupervisor, :which_children, [@supervisor, :local])
+
       {node, Enum.sort(local_children)}
     end
   end
 
   defp global_children(node) do
-    :rpc.call(node, Pogo.DynamicSupervisor, :which_children, [:global]) |> Enum.sort()
+    :rpc.call(node, Pogo.DynamicSupervisor, :which_children, [@supervisor, :global])
+    |> Enum.sort()
   end
 end

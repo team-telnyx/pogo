@@ -8,7 +8,8 @@ defmodule TestApp.Application do
   @impl true
   def start(_type, _args) do
     children = [
-      {Pogo.DynamicSupervisor, scope: :test, sync_interval: 100}
+      {Pogo.DynamicSupervisor,
+       name: TestApp.DistributedSupervisor, scope: :test, sync_interval: 100}
     ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html
