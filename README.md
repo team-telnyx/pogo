@@ -13,8 +13,7 @@ Features of distributed supevisor:
 
 ## Installation
 
-If [available in Hex](https://hex.pm/docs/publish), the package can be installed
-by adding `pogo` to your list of dependencies in `mix.exs`:
+The package can be installed by adding `pogo` to your list of dependencies in `mix.exs`:
 
 ```elixir
 def deps do
@@ -97,4 +96,4 @@ Original version of this library was developed by [Guilherme Balena Versiani](ht
 
 ## License
 
-GNU Lesser General Public License v3.0, see [`LICENSE`](/LICENSE) for details.
+GNU Lesser General Public License v3.0, see [`LICENSE`](LICENSE) for details.

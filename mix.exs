@@ -56,7 +56,7 @@ defmodule Pogo.MixProject do
   defp docs do
     [
       main: "Readme",
-      extras: ["README.md"]
+      extras: ["README.md", "LICENSE"]
     ]
   end
 
