@@ -85,11 +85,6 @@ Pogo.DynamicSupervisor.terminate_child(
 )
 ```
 
-## Documentation
-
-Full documentation can be found at [hexdocs.pm/pogo](https://hexdocs.pm/pogo).
-
-
 ## Acknowledgments
 
 Original version of this library was developed by [Guilherme Balena Versiani](https://github.com/balena).
