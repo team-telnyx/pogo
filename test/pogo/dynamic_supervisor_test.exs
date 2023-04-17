@@ -134,6 +134,33 @@ defmodule Pogo.DynamicSupervisorTest do
     end
   end
 
+  test "starts process on another node when the node it was scheduled on goes down" do
+    [node1, node2, node3] = start_nodes("foo", 3)
+
+    start_child(node2, Pogo.Worker.child_spec(1))
+
+    assert_async do
+      assert %{
+               ^node1 => [],
+               ^node2 => [
+                 {{Pogo.Worker, 1}, _, :worker, _}
+               ],
+               ^node3 => []
+             } = local_children([node1, node2, node3])
+    end
+
+    stop_nodes([node2])
+
+    assert_async do
+      assert %{
+               ^node1 => [],
+               ^node3 => [
+                 {{Pogo.Worker, 1}, _, :worker, _}
+               ]
+             } = local_children([node1, node3])
+    end
+  end
+
   describe "which_children/1" do
     test "returns children running on the node when called with :local" do
       [node1, node2] = nodes = start_nodes("foo", 2)
