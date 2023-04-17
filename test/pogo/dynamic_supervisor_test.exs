@@ -161,6 +161,113 @@ defmodule Pogo.DynamicSupervisorTest do
     end
   end
 
+  @tag chaos: true
+  test "chaos" do
+    # start nodes
+    nodes = start_nodes("foo", 10)
+
+    # start children
+    specs = for id <- 1..60, do: Pogo.Worker.child_spec(id)
+    for spec <- specs, do: start_child(Enum.random(nodes), spec)
+
+    :timer.sleep(1000)
+
+    # stop some nodes
+    nodes_to_stop = Enum.shuffle(nodes) |> Enum.take(5)
+    stop_nodes(nodes_to_stop)
+    nodes = nodes -- nodes_to_stop
+
+    :timer.sleep(1000)
+
+    # terminate some children
+    specs_to_terminate = Enum.shuffle(specs) |> Enum.take(45)
+    for spec <- specs_to_terminate, do: terminate_child(Enum.random(nodes), spec)
+    specs = specs -- specs_to_terminate
+
+    # start some more children
+    specs_to_start = for id <- 61..120, do: Pogo.Worker.child_spec(id)
+    for spec <- specs_to_start, do: start_child(Enum.random(nodes), spec)
+    specs = specs ++ specs_to_start
+
+    :timer.sleep(1000)
+
+    # start some more nodes
+    nodes = nodes ++ start_nodes("bar", 10)
+
+    :timer.sleep(1000)
+
+    # terminate some children
+    specs_to_terminate = Enum.shuffle(specs) |> Enum.take(30)
+    for spec <- specs_to_terminate, do: terminate_child(Enum.random(nodes), spec)
+    specs = specs -- specs_to_terminate
+
+    # start some more children
+    specs_to_start = for id <- 121..150, do: Pogo.Worker.child_spec(id)
+    for spec <- specs_to_start, do: start_child(Enum.random(nodes), spec)
+    specs = specs ++ specs_to_start
+
+    :timer.sleep(3000)
+
+    node = Enum.random(nodes)
+    all_nodes = Enum.sort(nodes)
+
+    children =
+      for {id, pid, :worker, _} <- global_children(node), into: %{} do
+        {id, pid}
+      end
+
+    # assert that all scheduled children are running in the cluster
+    for %{id: id} <- specs do
+      pid = Map.get(children, id)
+      assert is_pid(pid)
+      assert :rpc.call(node(pid), Process, :alive?, [pid])
+    end
+
+    # assert that terminated children are not running in the cluster
+    assert Enum.count(specs) == Enum.count(children)
+
+    #######################
+    ### test ugly internals
+    #######################
+
+    pg_state =
+      for group <- :rpc.call(node, :pg, :which_groups, [:test]), into: %{} do
+        members = :rpc.call(node, :pg, :get_members, [:test, group])
+        {group, members}
+      end
+
+    groups =
+      for {group, members} <- pg_state, into: %{} do
+        nodes = Enum.map(members, &node(&1))
+        {group, nodes}
+      end
+
+    # assert all nodes are participating
+    participating_nodes = for {{:member, node}, _} <- groups, do: node
+    assert Enum.sort(participating_nodes) == all_nodes
+
+    # assert all child specs are tracked by all nodes
+    for spec <- specs do
+      tracking_nodes = Map.get(groups, {:spec, spec}, [])
+      assert Enum.sort(tracking_nodes) == all_nodes
+    end
+
+    # assert no dangling start_child or terminate_child requests
+    refute groups
+           |> Enum.any?(fn
+             {{:start_child, _}, _} -> true
+             {{:terminate_child, _}, _} -> true
+             _ -> false
+           end)
+
+    # assert no dangling terminating markings
+    refute groups
+           |> Enum.any?(fn
+             {{:terminating, _}, _} -> true
+             _ -> false
+           end)
+  end
+
   describe "which_children/1" do
     test "returns children running on the node when called with :local" do
       [node1, node2] = nodes = start_nodes("foo", 2)
