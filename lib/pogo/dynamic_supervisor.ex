@@ -59,12 +59,12 @@ defmodule Pogo.DynamicSupervisor do
   Requests a child process to be started under one of the supervisors in the cluster.
   """
   @spec start_child(Supervisor.supervisor(), Supervisor.child_spec() | {module, term} | module) ::
-          :ok
+          :ok | {:error, any}
   def start_child(supervisor, child_spec) do
     child_spec = Supervisor.child_spec(child_spec, [])
 
     case validate_child(child_spec) do
-      :ok -> GenServer.call(supervisor, {:start_child, child_spec})
+      :ok -> GenServer.cast(supervisor, {:start_child, child_spec})
       error -> {:error, error}
     end
   end
@@ -75,7 +75,7 @@ defmodule Pogo.DynamicSupervisor do
   """
   @spec terminate_child(Supervisor.supervisor(), term) :: :ok
   def terminate_child(supervisor, id) do
-    GenServer.call(supervisor, {:terminate_child, id})
+    GenServer.cast(supervisor, {:terminate_child, id})
   end
 
   @doc """
@@ -113,16 +113,6 @@ defmodule Pogo.DynamicSupervisor do
   end
 
   @impl true
-  def handle_call({:start_child, child_spec}, _from, %{scope: scope} = state) do
-    make_request(scope, {:start_child, child_spec})
-    {:reply, :ok, state}
-  end
-
-  def handle_call({:terminate_child, id}, _from, %{scope: scope} = state) do
-    make_request(scope, {:terminate_child, id})
-    {:reply, :ok, state}
-  end
-
   def handle_call({:which_children, :local}, _from, %{supervisor: supervisor} = state) do
     {:reply, Supervisor.which_children(supervisor), state}
   end
@@ -140,6 +130,17 @@ defmodule Pogo.DynamicSupervisor do
       end
 
     {:reply, children, state}
+  end
+
+  @impl true
+  def handle_cast({:start_child, child_spec}, %{scope: scope} = state) do
+    make_request(scope, {:start_child, child_spec})
+    {:noreply, state}
+  end
+
+  def handle_cast({:terminate_child, id}, %{scope: scope} = state) do
+    make_request(scope, {:terminate_child, id})
+    {:noreply, state}
   end
 
   @impl true
