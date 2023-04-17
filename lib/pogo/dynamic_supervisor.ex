@@ -151,8 +151,9 @@ defmodule Pogo.DynamicSupervisor do
 
     process_start_child_requests(scope, supervisor, ring)
     process_terminate_child_requests(scope, supervisor, ring)
-    sync_children(scope, supervisor, ring)
+    distribute_children(scope, supervisor, ring)
     sync_local_children(scope, supervisor)
+    sync_specs(scope)
     cleanup(scope)
 
     Process.send_after(self(), :sync, sync_interval)
@@ -183,13 +184,11 @@ defmodule Pogo.DynamicSupervisor do
   end
 
   defp process_start_child_requests(scope, supervisor, ring) do
-    self_node = Node.self()
-
     for {:start_child, %{id: id} = child_spec} = request <- :pg.which_groups(scope) do
       {assigned_node, assigned_supervisor} = assign_child(scope, id, ring)
 
-      case assigned_node do
-        ^self_node ->
+      cond do
+        assigned_node == Node.self() ->
           unless supervising?(scope, child_spec) do
             {:ok, pid} = Supervisor.start_child(supervisor, child_spec)
 
@@ -200,50 +199,45 @@ defmodule Pogo.DynamicSupervisor do
 
           complete_request(scope, request)
 
-        _ ->
-          if tracks_spec?(scope, child_spec, assigned_supervisor) do
-            complete_request(scope, request)
-          end
+        tracks_spec?(scope, child_spec, assigned_supervisor) ->
+          complete_request(scope, request)
+
+        true ->
+          :noop
       end
     end
   end
 
   defp process_terminate_child_requests(scope, supervisor, ring) do
-    self_node = Node.self()
-
     for {:terminate_child, id} = request <- :pg.which_groups(scope) do
       {assigned_node, assigned_supervisor} = assign_child(scope, id, ring)
+      child_spec = get_child_spec(scope, id)
 
-      case assigned_node do
-        ^self_node ->
+      cond do
+        assigned_node == Node.self() ->
           start_terminate(scope, id)
 
-          with {:ok, child_spec} <- fetch_child_spec(scope, id),
-               supervising?(scope, child_spec) do
+          if child_spec && supervising?(scope, child_spec) do
             Supervisor.terminate_child(supervisor, id)
             Supervisor.delete_child(supervisor, id)
 
             untrack_supervisor(scope, child_spec)
             untrack_spec(scope, child_spec)
-            complete_request(scope, request)
           end
 
-        _ ->
-          case fetch_child_spec(scope, id) do
-            {:ok, child_spec} ->
-              # complete request only after assigned supervisor untracks the spec
-              unless tracks_spec?(scope, child_spec, assigned_supervisor) do
-                complete_request(scope, request)
-              end
+          complete_request(scope, request)
 
-            :error ->
-              complete_request(scope, request)
-          end
+        is_nil(child_spec) || !tracks_spec?(scope, child_spec, assigned_supervisor) ->
+          # complete request only after assigned supervisor untracks the spec
+          complete_request(scope, request)
+
+        true ->
+          :noop
       end
     end
   end
 
-  defp sync_children(scope, supervisor, ring) do
+  defp distribute_children(scope, supervisor, ring) do
     self_node = Node.self()
 
     for {:spec, %{id: id} = child_spec} <- :pg.which_groups(scope) do
@@ -264,7 +258,7 @@ defmodule Pogo.DynamicSupervisor do
 
         _ ->
           # child is assigned to a different node
-          # terminate it here, if it's already started there
+          # terminate it here, but only if it's already started there
 
           if supervising?(scope, child_spec) &&
                tracks_spec?(scope, child_spec, assigned_supervisor) do
@@ -273,19 +267,23 @@ defmodule Pogo.DynamicSupervisor do
 
             untrack_supervisor(scope, child_spec)
           end
+      end
+    end
+  end
 
-          cond do
-            terminating?(scope, id) ->
-              # untrack spec if child is being terminated
-              untrack_spec(scope, child_spec)
+  defp sync_specs(scope) do
+    for {:spec, %{id: id} = child_spec} <- :pg.which_groups(scope) do
+      cond do
+        terminating?(scope, id) ->
+          # untrack spec if child is being terminated
+          untrack_spec(scope, child_spec)
 
-            alive?(scope, child_spec) ->
-              # track spec only after it is tracked by its assigned supervisor
-              track_spec(scope, child_spec)
+        alive?(scope, child_spec) ->
+          # track spec only after it is started by its assigned supervisor
+          track_spec(scope, child_spec)
 
-            true ->
-              :noop
-          end
+        true ->
+          :noop
       end
     end
   end
@@ -400,6 +398,13 @@ defmodule Pogo.DynamicSupervisor do
       _ ->
         false
     end)
+  end
+
+  defp get_child_spec(scope, id) do
+    case fetch_child_spec(scope, id) do
+      {:ok, child_spec} -> child_spec
+      :error -> nil
+    end
   end
 
   defp validate_child(%{id: _, start: {mod, _, _} = start} = child) do
