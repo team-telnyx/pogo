@@ -114,26 +114,12 @@ defmodule Pogo.DynamicSupervisor do
 
   @impl true
   def handle_call({:start_child, child_spec}, _from, %{scope: scope} = state) do
-    unless self() in :pg.get_members(scope, {:spec, child_spec}) do
-      # schedule the child process to be started at next sync
-      :pg.join(scope, {:spec, child_spec}, self())
-    end
-
+    make_request(scope, {:start_child, child_spec})
     {:reply, :ok, state}
   end
 
   def handle_call({:terminate_child, id}, _from, %{scope: scope} = state) do
-    with {:ok, child_spec} <- fetch_child_spec(scope, id),
-         {:ok, supervisor} <- fetch_supervisor(scope, id) do
-      if node(supervisor) == Node.self() do
-        # schedule the child process to be terminated at next sync
-        :pg.leave(scope, {:spec, child_spec}, self())
-      else
-        # forward the request to the node that originally scheduled the process
-        GenServer.call(supervisor, {:terminate_child, id})
-      end
-    end
-
+    make_request(scope, {:terminate_child, id})
     {:reply, :ok, state}
   end
 
@@ -161,50 +147,144 @@ defmodule Pogo.DynamicSupervisor do
         :sync,
         %{scope: scope, supervisor: supervisor, sync_interval: sync_interval} = state
       ) do
-    distribute_children(scope, supervisor)
+    ring = node_ring(scope)
+
+    process_start_child_requests(scope, supervisor, ring)
+    process_terminate_child_requests(scope, supervisor, ring)
+    sync_children(scope, supervisor, ring)
     sync_local_children(scope, supervisor)
+    cleanup(scope)
 
     Process.send_after(self(), :sync, sync_interval)
 
     {:noreply, state}
   end
 
-  defp distribute_children(scope, supervisor) do
-    self_node = Node.self()
+  defp node_ring(scope) do
     groups = :pg.which_groups(scope)
 
     # build a consistent hash ring of existing nodes to distribute
     # child processes among them
-    ring =
-      for {:member, node} <- groups, reduce: HashRing.new() do
-        acc -> HashRing.add_node(acc, node)
+    for {:member, node} <- groups, reduce: HashRing.new() do
+      acc -> HashRing.add_node(acc, node)
+    end
+  end
+
+  defp assign_child(scope, id, ring) do
+    assigned_node = HashRing.key_to_node(ring, id)
+
+    assigned_supervisor =
+      case :pg.get_members(scope, {:member, assigned_node}) do
+        [supervisor | _] -> supervisor
+        _ -> nil
       end
 
-    # go through all the child specs and ensure that the current node
-    # runs all the proceses designated to it and only them
-    for {:spec, %{id: id} = child_spec} <- groups do
-      case HashRing.key_to_node(ring, id) do
-        ^self_node ->
-          # the child process should run on current node
+    {assigned_node, assigned_supervisor}
+  end
 
-          if self() not in :pg.get_members(scope, {:child, id}) do
-            # but it's not running yet, so start it
+  defp process_start_child_requests(scope, supervisor, ring) do
+    self_node = Node.self()
+
+    for {:start_child, %{id: id} = child_spec} = request <- :pg.which_groups(scope) do
+      {assigned_node, assigned_supervisor} = assign_child(scope, id, ring)
+
+      case assigned_node do
+        ^self_node ->
+          unless supervising?(scope, child_spec) do
             {:ok, pid} = Supervisor.start_child(supervisor, child_spec)
-            :pg.join(scope, {:child, id}, self())
-            :pg.join(scope, {:pid, id}, pid)
+
+            track_supervisor(scope, child_spec)
+            track_pid(scope, child_spec, pid)
+            track_spec(scope, child_spec)
+          end
+
+          complete_request(scope, request)
+
+        _ ->
+          if tracks_spec?(scope, child_spec, assigned_supervisor) do
+            complete_request(scope, request)
+          end
+      end
+    end
+  end
+
+  defp process_terminate_child_requests(scope, supervisor, ring) do
+    self_node = Node.self()
+
+    for {:terminate_child, id} = request <- :pg.which_groups(scope) do
+      {assigned_node, assigned_supervisor} = assign_child(scope, id, ring)
+
+      case assigned_node do
+        ^self_node ->
+          start_terminate(scope, id)
+
+          with {:ok, child_spec} <- fetch_child_spec(scope, id),
+               supervising?(scope, child_spec) do
+            Supervisor.terminate_child(supervisor, id)
+            Supervisor.delete_child(supervisor, id)
+
+            untrack_supervisor(scope, child_spec)
+            untrack_spec(scope, child_spec)
+            complete_request(scope, request)
           end
 
         _ ->
-          # the child process should run on another node
+          case fetch_child_spec(scope, id) do
+            {:ok, child_spec} ->
+              # complete request only after assigned supervisor untracks the spec
+              unless tracks_spec?(scope, child_spec, assigned_supervisor) do
+                complete_request(scope, request)
+              end
 
-          if self() in :pg.get_members(scope, {:child, id}) do
-            # but it's running on current node, so terminate it here
-            with {:ok, pid} <- fetch_local_pid(supervisor, id) do
-              Supervisor.terminate_child(supervisor, id)
-              Supervisor.delete_child(supervisor, id)
-              :pg.leave(scope, {:child, id}, self())
-              :pg.leave(scope, {:pid, id}, pid)
-            end
+            :error ->
+              complete_request(scope, request)
+          end
+      end
+    end
+  end
+
+  defp sync_children(scope, supervisor, ring) do
+    self_node = Node.self()
+
+    for {:spec, %{id: id} = child_spec} <- :pg.which_groups(scope) do
+      {assigned_node, assigned_supervisor} = assign_child(scope, id, ring)
+
+      case assigned_node do
+        ^self_node ->
+          # child is assigned to current node
+          # start it here, if it's not started yet and it's not being terminated
+
+          unless terminating?(scope, id) || supervising?(scope, child_spec) do
+            {:ok, pid} = Supervisor.start_child(supervisor, child_spec)
+
+            track_supervisor(scope, child_spec)
+            track_pid(scope, child_spec, pid)
+            track_spec(scope, child_spec)
+          end
+
+        _ ->
+          # child is assigned to a different node
+          # terminate it here, if it's already started there
+
+          if supervising?(scope, child_spec) &&
+               tracks_spec?(scope, child_spec, assigned_supervisor) do
+            Supervisor.terminate_child(supervisor, id)
+            Supervisor.delete_child(supervisor, id)
+
+            untrack_supervisor(scope, child_spec)
+          end
+
+          cond do
+            terminating?(scope, id) ->
+              # untrack spec if child is being terminated
+              untrack_spec(scope, child_spec)
+
+            alive?(scope, child_spec) ->
+              # track spec only after it is tracked by its assigned supervisor
+              track_spec(scope, child_spec)
+
+            true ->
+              :noop
           end
       end
     end
@@ -213,37 +293,89 @@ defmodule Pogo.DynamicSupervisor do
   defp sync_local_children(scope, supervisor) do
     # go through all processes supervised by the local supervisor
     # to sync its state with cluster supervisor
-    for child <- Supervisor.which_children(supervisor) do
-      sync_local_child(child, scope, supervisor)
+    for {id, pid, _, _} <- Supervisor.which_children(supervisor) do
+      case pid do
+        :undefined ->
+          # restart supervised child process that is not running
+          with {:ok, pid} when is_pid(pid) <- Supervisor.restart_child(supervisor, id) do
+            join_once(scope, {:pid, id}, pid)
+          end
+
+        pid when is_pid(pid) ->
+          # ensure that we track new pids of child processes that may have
+          # crashed and been restarted by local supervisor
+          join_once(scope, {:pid, id}, pid)
+
+        _ ->
+          :noop
+      end
     end
   end
 
-  defp sync_local_child({id, pid, _, _}, scope, supervisor) when is_pid(pid) do
-    case fetch_child_spec(scope, id) do
-      {:ok, _child_spec} ->
-        # ensure that we track new pids of child processes that may have
-        # crashed and been restarted by local supervisor
-        unless pid in :pg.get_members(scope, {:pid, id}) do
-          :pg.join(scope, {:pid, id}, pid)
-        end
-
-      :error ->
-        # terminate child processes that were scheduled to be terminated
-        # (by having their specs removed)
-        Supervisor.terminate_child(supervisor, id)
-        Supervisor.delete_child(supervisor, id)
-        :pg.leave(scope, {:child, id}, self())
-        :pg.leave(scope, {:pid, id}, pid)
+  defp cleanup(scope) do
+    # clean up terminating children if they have been untracked by all supervisors
+    for {:terminating, id} <- :pg.which_groups(scope),
+        :error == fetch_child_spec(scope, id) do
+      finish_terminate(scope, id)
     end
   end
 
-  defp sync_local_child({id, :undefined, _, _}, _scope, supervisor) do
-    # restart supervised child process that is not running
-    Supervisor.restart_child(supervisor, id)
+  defp make_request(scope, request) do
+    join_once(scope, request, self())
   end
 
-  defp sync_local_child(_, _, _) do
-    :noop
+  defp complete_request(scope, request) do
+    :pg.leave(scope, request, self())
+  end
+
+  defp supervising?(scope, %{id: id}) do
+    self() in :pg.get_members(scope, {:supervisor, id})
+  end
+
+  defp track_supervisor(scope, %{id: id}) do
+    :pg.join(scope, {:supervisor, id}, self())
+  end
+
+  defp untrack_supervisor(scope, %{id: id}) do
+    :pg.leave(scope, {:supervisor, id}, self())
+  end
+
+  defp track_pid(scope, %{id: id}, pid) do
+    :pg.join(scope, {:pid, id}, pid)
+  end
+
+  defp track_spec(scope, child_spec) do
+    join_once(scope, {:spec, child_spec}, self())
+  end
+
+  defp untrack_spec(scope, child_spec) do
+    :pg.leave(scope, {:spec, child_spec}, self())
+  end
+
+  defp tracks_spec?(scope, child_spec, supervisor) do
+    supervisor in :pg.get_members(scope, {:spec, child_spec})
+  end
+
+  defp alive?(scope, child_spec) do
+    :pg.get_members(scope, {:pid, child_spec.id}) != []
+  end
+
+  defp start_terminate(scope, id) do
+    join_once(scope, {:terminating, id}, self())
+  end
+
+  defp finish_terminate(scope, id) do
+    :pg.leave(scope, {:terminating, id}, self())
+  end
+
+  defp terminating?(scope, id) do
+    :pg.get_members(scope, {:terminating, id}) != []
+  end
+
+  defp join_once(scope, group, pid) do
+    unless pid in :pg.get_members(scope, group) do
+      :pg.join(scope, group, pid)
+    end
   end
 
   defp to_child(scope, id) do
@@ -268,27 +400,6 @@ defmodule Pogo.DynamicSupervisor do
       _ ->
         false
     end)
-  end
-
-  defp fetch_local_pid(supervisor, id) do
-    children = Supervisor.which_children(supervisor)
-
-    Enum.find_value(children, :error, fn
-      {^id, pid, _, _} when is_pid(pid) ->
-        {:ok, pid}
-
-      _ ->
-        false
-    end)
-  end
-
-  defp fetch_supervisor(scope, id) do
-    {:ok, spec} = fetch_child_spec(scope, id)
-
-    case :pg.get_members(scope, {:spec, spec}) do
-      [pid | _] -> {:ok, pid}
-      _ -> :error
-    end
   end
 
   defp validate_child(%{id: _, start: {mod, _, _} = start} = child) do
