@@ -1,2 +1,0 @@
-defmodule TestAppWithChildren do
-end
