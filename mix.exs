@@ -33,6 +33,7 @@ defmodule Pogo.MixProject do
       {:libring, "~> 1.6.0"},
       {:local_cluster, "~> 1.2.1", only: [:test]},
       {:test_app, path: "test_app", only: [:test]},
+      {:test_app_with_children, path: "test_app_with_children", only: [:test]},
       {:ex_doc, "~> 0.29", only: [:dev], runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false}
     ]

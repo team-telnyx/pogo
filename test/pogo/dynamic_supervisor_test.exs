@@ -2,7 +2,7 @@ defmodule Pogo.DynamicSupervisorTest do
   use ExUnit.Case
   import AssertAsync
 
-  @supervisor TestApp.DistributedSupervisor
+  @supervisor PogoTest.DistributedSupervisor
 
   setup do
     on_exit(fn ->
@@ -15,7 +15,7 @@ defmodule Pogo.DynamicSupervisorTest do
   end
 
   test "starts child on a single node in the cluster" do
-    [node1, node2] = start_nodes("foo", 2)
+    [node1, node2] = start_nodes(:test_app, "foo", 2)
 
     child_spec = Pogo.Worker.child_spec(1)
 
@@ -31,7 +31,7 @@ defmodule Pogo.DynamicSupervisorTest do
   end
 
   test "terminates child running in the cluster" do
-    [node1, node2] = nodes = start_nodes("foo", 2)
+    [node1, node2] = nodes = start_nodes(:test_app, "foo", 2)
 
     [child_spec1, _child_spec2, child_spec3] =
       for id <- 1..3 do
@@ -80,7 +80,7 @@ defmodule Pogo.DynamicSupervisorTest do
   end
 
   test "keeps track of new pid when child process crashes and gets restarted" do
-    [node] = start_nodes("foo", 1)
+    [node] = start_nodes(:test_app, "foo", 1)
 
     child_spec = Pogo.Worker.child_spec(1)
     start_child(node, child_spec)
@@ -99,7 +99,7 @@ defmodule Pogo.DynamicSupervisorTest do
   end
 
   test "moves children between nodes when cluster topology changes" do
-    [node1] = start_nodes("foo", 1)
+    [node1] = start_nodes(:test_app, "foo", 1)
 
     start_child(node1, Pogo.Worker.child_spec(1))
     start_child(node1, Pogo.Worker.child_spec(2))
@@ -113,7 +113,7 @@ defmodule Pogo.DynamicSupervisorTest do
              } = local_children([node1])
     end
 
-    [node2] = start_nodes("bar", 1)
+    [node2] = start_nodes(:test_app, "bar", 1)
 
     assert_async do
       assert %{
@@ -135,7 +135,7 @@ defmodule Pogo.DynamicSupervisorTest do
   end
 
   test "starts process on another node when the node it was scheduled on goes down" do
-    [node1, node2, node3] = start_nodes("foo", 3)
+    [node1, node2, node3] = start_nodes(:test_app, "foo", 3)
 
     start_child(node2, Pogo.Worker.child_spec(1))
 
@@ -161,10 +161,53 @@ defmodule Pogo.DynamicSupervisorTest do
     end
   end
 
+  test "starts distributed supervisor with initial list of children" do
+    [node1, node2, node3] = start_nodes(:test_app_with_children, "foo", 3)
+
+    assert_async do
+      assert %{
+               ^node1 => [{{Pogo.Worker, 2}, _, :worker, _}],
+               ^node2 => [
+                 {{Pogo.Worker, 1}, _, :worker, _},
+                 {{Pogo.Worker, 3}, _, :worker, _}
+               ],
+               ^node3 => []
+             } = local_children([node1, node2, node3])
+    end
+  end
+
+  test "initial list of children is automatically started after supervisor crash" do
+    [node] = start_nodes(:test_app_with_children, "foo", 1)
+
+    assert_async do
+      assert %{
+               ^node => [
+                 {{Pogo.Worker, 1}, _, :worker, _},
+                 {{Pogo.Worker, 2}, _, :worker, _},
+                 {{Pogo.Worker, 3}, _, :worker, _}
+               ]
+             } = local_children([node])
+    end
+
+    # kill supervisor
+    pid = :rpc.call(node, Process, :whereis, [PogoTest.DistributedSupervisor])
+    :rpc.call(node, Process, :exit, [pid, :brutal_kill])
+
+    assert_async do
+      assert %{
+               ^node => [
+                 {{Pogo.Worker, 1}, _, :worker, _},
+                 {{Pogo.Worker, 2}, _, :worker, _},
+                 {{Pogo.Worker, 3}, _, :worker, _}
+               ]
+             } = local_children([node])
+    end
+  end
+
   @tag chaos: true
   test "chaos" do
     # start nodes
-    nodes = start_nodes("foo", 10)
+    nodes = start_nodes(:test_app, "foo", 10)
 
     # start children
     specs = for id <- 1..60, do: Pogo.Worker.child_spec(id)
@@ -192,7 +235,7 @@ defmodule Pogo.DynamicSupervisorTest do
     :timer.sleep(1000)
 
     # start some more nodes
-    nodes = nodes ++ start_nodes("bar", 10)
+    nodes = nodes ++ start_nodes(:test_app, "bar", 10)
 
     :timer.sleep(1000)
 
@@ -270,7 +313,7 @@ defmodule Pogo.DynamicSupervisorTest do
 
   describe "which_children/1" do
     test "returns children running on the node when called with :local" do
-      [node1, node2] = nodes = start_nodes("foo", 2)
+      [node1, node2] = nodes = start_nodes(:test_app, "foo", 2)
 
       start_child(node1, Pogo.Worker.child_spec(1))
       start_child(node1, Pogo.Worker.child_spec(2))
@@ -299,7 +342,7 @@ defmodule Pogo.DynamicSupervisorTest do
     end
 
     test "returns all children running in cluster when called with :global" do
-      [node1, node2] = start_nodes("foo", 2)
+      [node1, node2] = start_nodes(:test_app, "foo", 2)
 
       start_child(node1, Pogo.Worker.child_spec(1))
       start_child(node1, Pogo.Worker.child_spec(2))
@@ -334,9 +377,9 @@ defmodule Pogo.DynamicSupervisorTest do
     end
   end
 
-  defp start_nodes(prefix, n) do
+  defp start_nodes(app, prefix, n) do
     LocalCluster.start_nodes(prefix, n,
-      applications: [:test_app],
+      applications: [app],
       files: ["test/support/pogo/worker.ex"]
     )
   end

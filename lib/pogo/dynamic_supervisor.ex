@@ -30,6 +30,13 @@ defmodule Pogo.DynamicSupervisor do
 
   use GenServer, type: :supervisor
 
+  @type option :: {:name, Supervised.name()}
+  @type init_option ::
+          Supervisor.init_option()
+          | {:scope, term}
+          | {:sync_interval, pos_integer()}
+          | {:children, [Supervisor.child_spec()]}
+
   @sync_interval 5_000
 
   defstruct [:scope, :supervisor, :sync_interval]
@@ -48,8 +55,14 @@ defmodule Pogo.DynamicSupervisor do
     * `sync_interval` - interval in milliseconds, how often the supervisor should
       synchronize its local state with the cluster by processing requests to
       start and terminate child processes, defaults to `5_000`
+    * `children` - list of child specifications to automatially start in the cluster
+
+  Children specified at startup are handled in the same way as children started
+  dynamically. The only difference is that when `Pogo.DynamicSupervisor` runs under
+  a supervision tree and is restarted, it will automatically restart all these
+  children as well.
   """
-  @spec start_link(keyword) :: GenServer.on_start()
+  @spec start_link([option | init_option]) :: GenServer.on_start()
   def start_link(opts) do
     {name, opts} = Keyword.pop(opts, :name, __MODULE__)
     GenServer.start_link(__MODULE__, opts, name: name)
@@ -93,6 +106,7 @@ defmodule Pogo.DynamicSupervisor do
   def init(opts) do
     scope = Keyword.fetch!(opts, :scope)
     {sync_interval, opts} = Keyword.pop(opts, :sync_interval, @sync_interval)
+    {children, opts} = Keyword.pop(opts, :children, [])
 
     opts = Keyword.put(opts, :strategy, :one_for_one)
 
@@ -109,7 +123,18 @@ defmodule Pogo.DynamicSupervisor do
 
     Process.send_after(self(), :sync, sync_interval)
 
-    {:ok, state}
+    {:ok, state, {:continue, {:start_children, children}}}
+  end
+
+  @impl true
+  def handle_continue({:start_children, children}, %{scope: scope} = state) do
+    for child_spec <- children do
+      child_spec = Supervisor.child_spec(child_spec, [])
+      :ok = validate_child(child_spec)
+      make_request(scope, {:start_child, child_spec})
+    end
+
+    {:noreply, state}
   end
 
   @impl true
