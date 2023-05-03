@@ -4,7 +4,7 @@ Pogo is a distributed supervisor for clustered Elixir applications.
 
 It uses battle-tested distributed named process groups (`:pg`) under the hood to maintain cluster-wide state and coordinate work between local supervisors running on different nodes.
 
-Features of distributed supevisor:
+Features of distributed supervisor:
 
   * automatically chooses a node to locally supervise child process
   * a child process running in the cluster can be started or stopped using any local supervisor
