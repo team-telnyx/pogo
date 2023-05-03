@@ -15,7 +15,7 @@ defmodule TestAppWithChildren.Application do
        children: [
          Pogo.Worker.child_spec(1),
          Pogo.Worker.child_spec(2),
-         Pogo.Worker.child_spec(3)
+         {Pogo.Worker, 3}
        ]}
     ]
 

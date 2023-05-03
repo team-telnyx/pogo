@@ -129,6 +129,8 @@ defmodule Pogo.DynamicSupervisor do
   @impl true
   def handle_continue({:start_children, children}, %{scope: scope} = state) do
     for child_spec <- children do
+      child_spec = Supervisor.child_spec(child_spec, [])
+      :ok = validate_child(child_spec)
       make_request(scope, {:start_child, child_spec})
     end
 
