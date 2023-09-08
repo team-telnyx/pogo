@@ -11,6 +11,8 @@ Features of distributed supervisor:
   * ensures a child is started only once in the cluster (as long as its child spec is unique)
   * redistibutes children when cluster topology changes
 
+You can read more in an [introductory article](https://szajbus.dev/elixir/2023/05/22/pogo-distributed-supervisor-for-elixir.html).
+
 ## Installation
 
 The package can be installed by adding `pogo` to your list of dependencies in `mix.exs`:
