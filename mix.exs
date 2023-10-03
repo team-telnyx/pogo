@@ -35,7 +35,8 @@ defmodule Pogo.MixProject do
       {:test_app, path: "test_app", only: [:test]},
       {:test_app_with_children, path: "test_app_with_children", only: [:test]},
       {:ex_doc, "~> 0.29", only: [:dev], runtime: false},
-      {:credo, "~> 1.7", only: [:dev, :test], runtime: false}
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+      {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false}
     ]
   end
 

@@ -30,7 +30,7 @@ defmodule Pogo.DynamicSupervisor do
 
   use GenServer, type: :supervisor
 
-  @type option :: {:name, Supervised.name()}
+  @type option :: {:name, Supervisor.name()}
   @type init_option ::
           Supervisor.init_option()
           | {:scope, term}
@@ -445,10 +445,6 @@ defmodule Pogo.DynamicSupervisor do
       end
 
     validate_child(start, restart, shutdown, type, modules)
-  end
-
-  defp validate_child(other) do
-    {:invalid_child_spec, other}
   end
 
   defp validate_child(start, restart, shutdown, type, modules) do
