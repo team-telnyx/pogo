@@ -16,6 +16,10 @@ defmodule Pogo.MixProject do
       docs: docs(),
       aliases: [
         test: "test --no-start"
+      ],
+      dialyzer: [
+        plt_add_apps: [:ex_unit, :mix],
+        list_unused_filters: true
       ]
     ]
   end
