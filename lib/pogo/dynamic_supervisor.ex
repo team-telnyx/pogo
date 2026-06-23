@@ -217,14 +217,7 @@ defmodule Pogo.DynamicSupervisor do
 
       cond do
         assigned_node == Node.self() ->
-          if supervising?(scope, child_spec) do
-            complete_request(scope, request)
-          else
-            case start_child(supervisor, scope, child_spec) do
-              :ok -> complete_request(scope, request)
-              :error -> :noop
-            end
-          end
+          start_assigned_child(scope, supervisor, child_spec, request)
 
         tracks_spec?(scope, child_spec, assigned_supervisor) ->
           complete_request(scope, request)
@@ -232,6 +225,14 @@ defmodule Pogo.DynamicSupervisor do
         true ->
           :noop
       end
+    end
+  end
+
+  defp start_assigned_child(scope, supervisor, child_spec, request) do
+    cond do
+      supervising?(scope, child_spec) -> complete_request(scope, request)
+      start_child(supervisor, scope, child_spec) == :ok -> complete_request(scope, request)
+      true -> :noop
     end
   end
 
@@ -351,46 +352,42 @@ defmodule Pogo.DynamicSupervisor do
   # caller can complete the pending request), :error otherwise (request is left
   # in place and retried on the next sync).
   defp start_child(supervisor, scope, child_spec) do
-    case Supervisor.start_child(supervisor, child_spec) do
-      {:ok, pid} when is_pid(pid) ->
-        register_child(scope, child_spec, pid)
-        :ok
+    supervisor
+    |> Supervisor.start_child(child_spec)
+    |> handle_start_result(supervisor, scope, child_spec)
+  end
 
-      {:ok, pid, _info} when is_pid(pid) ->
-        register_child(scope, child_spec, pid)
-        :ok
+  defp handle_start_result({:ok, pid}, _supervisor, scope, child_spec) when is_pid(pid) do
+    register_child(scope, child_spec, pid)
+  end
 
-      {:error, {:already_started, pid}} when is_pid(pid) ->
-        # stale :pg state said we were not supervising it, adopt the running child
-        register_child(scope, child_spec, pid)
-        :ok
+  defp handle_start_result({:ok, pid, _info}, _supervisor, scope, child_spec) when is_pid(pid) do
+    register_child(scope, child_spec, pid)
+  end
 
-      {:error, :already_present} ->
-        # child spec is kept by the local supervisor but not running, restart it
-        case Supervisor.restart_child(supervisor, child_spec.id) do
-          {:ok, pid} when is_pid(pid) ->
-            register_child(scope, child_spec, pid)
-            :ok
+  # stale :pg state said we were not supervising it, adopt the running child
+  defp handle_start_result({:error, {:already_started, pid}}, _supervisor, scope, child_spec)
+       when is_pid(pid) do
+    register_child(scope, child_spec, pid)
+  end
 
-          {:ok, pid, _info} when is_pid(pid) ->
-            register_child(scope, child_spec, pid)
-            :ok
+  # child spec is kept by the local supervisor but not running, restart it
+  defp handle_start_result({:error, :already_present}, supervisor, scope, child_spec) do
+    supervisor
+    |> Supervisor.restart_child(child_spec.id)
+    |> handle_start_result(supervisor, scope, child_spec)
+  end
 
-          other ->
-            log_start_failure(child_spec, other)
-            :error
-        end
-
-      other ->
-        log_start_failure(child_spec, other)
-        :error
-    end
+  defp handle_start_result(other, _supervisor, _scope, child_spec) do
+    log_start_failure(child_spec, other)
+    :error
   end
 
   defp register_child(scope, child_spec, pid) do
     track_supervisor(scope, child_spec)
     track_pid(scope, child_spec, pid)
     track_spec(scope, child_spec)
+    :ok
   end
 
   defp log_start_failure(%{id: id}, reason) do
