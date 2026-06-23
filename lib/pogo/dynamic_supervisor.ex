@@ -30,6 +30,8 @@ defmodule Pogo.DynamicSupervisor do
 
   use GenServer, type: :supervisor
 
+  require Logger
+
   @type option :: {:name, Supervised.name()}
   @type init_option ::
           Supervisor.init_option()
@@ -215,15 +217,7 @@ defmodule Pogo.DynamicSupervisor do
 
       cond do
         assigned_node == Node.self() ->
-          unless supervising?(scope, child_spec) do
-            {:ok, pid} = Supervisor.start_child(supervisor, child_spec)
-
-            track_supervisor(scope, child_spec)
-            track_pid(scope, child_spec, pid)
-            track_spec(scope, child_spec)
-          end
-
-          complete_request(scope, request)
+          start_assigned_child(scope, supervisor, child_spec, request)
 
         tracks_spec?(scope, child_spec, assigned_supervisor) ->
           complete_request(scope, request)
@@ -231,6 +225,14 @@ defmodule Pogo.DynamicSupervisor do
         true ->
           :noop
       end
+    end
+  end
+
+  defp start_assigned_child(scope, supervisor, child_spec, request) do
+    cond do
+      supervising?(scope, child_spec) -> complete_request(scope, request)
+      start_child(supervisor, scope, child_spec) == :ok -> complete_request(scope, request)
+      true -> :noop
     end
   end
 
@@ -275,11 +277,7 @@ defmodule Pogo.DynamicSupervisor do
           # start it here, if it's not started yet and it's not being terminated
 
           unless terminating?(scope, id) || supervising?(scope, child_spec) do
-            {:ok, pid} = Supervisor.start_child(supervisor, child_spec)
-
-            track_supervisor(scope, child_spec)
-            track_pid(scope, child_spec, pid)
-            track_spec(scope, child_spec)
+            start_child(supervisor, scope, child_spec)
           end
 
         _ ->
@@ -342,6 +340,60 @@ defmodule Pogo.DynamicSupervisor do
         :error == fetch_child_spec(scope, id) do
       finish_terminate(scope, id)
     end
+  end
+
+  # Starts a child under the local supervisor and registers it cluster-wide.
+  #
+  # Supervisor.start_child/2 does not always return {:ok, pid}. A non-ok return
+  # must never crash the distributed supervisor, otherwise every child on the
+  # node is torn down with it (dangling calls), the children get rescheduled and
+  # duplicated across nodes, and the crash/restart churn leaks processes (high
+  # memory). Returns :ok when the child is started or already present (so the
+  # caller can complete the pending request), :error otherwise (request is left
+  # in place and retried on the next sync).
+  defp start_child(supervisor, scope, child_spec) do
+    supervisor
+    |> Supervisor.start_child(child_spec)
+    |> handle_start_result(supervisor, scope, child_spec)
+  end
+
+  defp handle_start_result({:ok, pid}, _supervisor, scope, child_spec) when is_pid(pid) do
+    register_child(scope, child_spec, pid)
+  end
+
+  defp handle_start_result({:ok, pid, _info}, _supervisor, scope, child_spec) when is_pid(pid) do
+    register_child(scope, child_spec, pid)
+  end
+
+  # stale :pg state said we were not supervising it, adopt the running child
+  defp handle_start_result({:error, {:already_started, pid}}, _supervisor, scope, child_spec)
+       when is_pid(pid) do
+    register_child(scope, child_spec, pid)
+  end
+
+  # child spec is kept by the local supervisor but not running, restart it
+  defp handle_start_result({:error, :already_present}, supervisor, scope, child_spec) do
+    supervisor
+    |> Supervisor.restart_child(child_spec.id)
+    |> handle_start_result(supervisor, scope, child_spec)
+  end
+
+  defp handle_start_result(other, _supervisor, _scope, child_spec) do
+    log_start_failure(child_spec, other)
+    :error
+  end
+
+  defp register_child(scope, child_spec, pid) do
+    track_supervisor(scope, child_spec)
+    track_pid(scope, child_spec, pid)
+    track_spec(scope, child_spec)
+    :ok
+  end
+
+  defp log_start_failure(%{id: id}, reason) do
+    Logger.error(
+      "Pogo.DynamicSupervisor failed to start child #{inspect(id)}: #{inspect(reason)}"
+    )
   end
 
   defp make_request(scope, request) do
