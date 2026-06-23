@@ -377,10 +377,32 @@ defmodule Pogo.DynamicSupervisorTest do
     end
   end
 
+  test "does not crash the supervisor when a child fails to start" do
+    [node] = start_nodes(:test_app, "foo", 1)
+
+    distributed_supervisor = :rpc.call(node, Process, :whereis, [@supervisor])
+    assert is_pid(distributed_supervisor)
+
+    # this child can never start, its init returns {:stop, _}
+    start_child(node, Pogo.FailingWorker.child_spec(1))
+
+    # a healthy child requested afterwards must still come up, which can only
+    # happen if the failed start above did not bring the supervisor down
+    start_child(node, Pogo.Worker.child_spec(2))
+
+    assert_async do
+      assert [{{Pogo.Worker, 2}, _, :worker, _}] =
+               :rpc.call(node, Pogo.DynamicSupervisor, :which_children, [@supervisor, :local])
+    end
+
+    # same supervisor process is still running, it was never restarted
+    assert :rpc.call(node, Process, :whereis, [@supervisor]) == distributed_supervisor
+  end
+
   defp start_nodes(app, prefix, n) do
     LocalCluster.start_nodes(prefix, n,
       applications: [app],
-      files: ["test/support/pogo/worker.ex"]
+      files: ["test/support/pogo/worker.ex", "test/support/pogo/failing_worker.ex"]
     )
   end
 
