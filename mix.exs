@@ -30,7 +30,7 @@ defmodule Pogo.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:libring, "~> 1.6.0"},
+      {:libring, "~> 1.7.0"},
       {:local_cluster, "~> 1.2.1", only: [:test]},
       {:test_app, path: "test_app", only: [:test]},
       {:test_app_with_children, path: "test_app_with_children", only: [:test]},
